@@ -1,378 +1,228 @@
 <?php
-/**
- * Project: MyAAC
- *     Automatic Account Creator for Open Tibia Servers
- * File: index.php
- *
- * This is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- *
- * This software is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
- * @package   MyAAC
- * @author    Slawkens <slawkens@gmail.com>
- * @copyright 2019 MyAAC
- * @link      https://my-aac.org
- */
 
-require_once 'common.php';
-require_once SYSTEM . 'functions.php';
+use Twig\Environment as Twig_Environment;
+use Twig\Loader\FilesystemLoader as Twig_FilesystemLoader;
 
-$uri = $_SERVER['REQUEST_URI'];
+require '../common.php';
 
-$tmp = BASE_DIR;
-if(!empty($tmp))
-	$uri = str_replace(BASE_DIR . '/', '', $uri);
-else
-	$uri = str_replace_first('/', '', $uri);
+define('MYAAC_INSTALL', true);
 
-$uri = str_replace(array('index.php/', '?'), '', $uri);
-define('URI', $uri);
+// includes
+require SYSTEM . 'functions.php';
+require BASE . 'install/includes/functions.php';
+require BASE . 'install/includes/locale.php';
+require SYSTEM . 'clients.conf.php';
 
-if(preg_match("/^[A-Za-z0-9-_%\'+]+\.png$/i", $uri)) {
-	$tmp = explode('.', $uri);
-	$_REQUEST['name'] = urldecode($tmp[0]);
+if(file_exists(BASE . 'config.local.php'))
+	require BASE . 'config.local.php';
 
-	chdir(TOOLS . 'signature');
-	include TOOLS . 'signature/index.php';
-	exit();
-}
+// ignore undefined index from Twig autoloader
+$config['env'] = 'prod';
 
-if(preg_match("/^(.*)\.(gif|jpg|png|jpeg|tiff|bmp|css|js|less|map|html|php|zip|rar|gz|ttf|woff|ico)$/i", $_SERVER['REQUEST_URI'])) {
-	header('HTTP/1.0 404 Not Found');
-	exit;
-}
+$twig_loader = new Twig_FilesystemLoader(SYSTEM . 'templates');
+$twig = new Twig_Environment($twig_loader, array(
+	'cache' => CACHE . 'twig/',
+	'auto_reload' => true
+));
 
-if(file_exists(BASE . 'config.local.php')) {
-	require_once BASE . 'config.local.php';
-}
+// load installation status
+$step = isset($_POST['step']) ? $_POST['step'] : 'welcome';
 
-ini_set('log_errors', 1);
-if(config('env') === 'dev') {
-	ini_set('display_errors', 1);
-	ini_set('display_startup_errors', 1);
-	error_reporting(E_ALL);
-}
-else {
-	ini_set('display_errors', 0);
-	ini_set('display_startup_errors', 0);
-	error_reporting(E_ALL & ~E_DEPRECATED & ~E_STRICT);
-}
+$install_status = array();
+if(file_exists(CACHE . 'install.txt')) {
+	$install_status = unserialize(file_get_contents(CACHE . 'install.txt'));
 
-if((!isset($config['installed']) || !$config['installed']) && file_exists(BASE . 'install'))
-{
-	header('Location: ' . BASE_URL . 'install/');
-	throw new RuntimeException('Setup detected that <b>install/</b> directory exists. Please visit <a href="' . BASE_URL . 'install">this</a> url to start MyAAC Installation.<br/>Delete <b>install/</b> directory if you already installed MyAAC.<br/>Remember to REFRESH this page when you\'re done!');
-}
-
-$found = false;
-if(empty($uri) || isset($_REQUEST['template'])) {
-	$_REQUEST['p'] = 'news';
-	$found = true;
-}
-else {
-	$tmp = strtolower($uri);
-	if(!preg_match('/[^A-z0-9_\-]/', $uri) && file_exists(SYSTEM . 'pages/' . $tmp . '.php')) {
-		$_REQUEST['p'] = $uri;
-		$found = true;
+	if(!isset($_POST['step'])) {
+		$step = isset($install_status['step']) ? $install_status['step'] : '';
 	}
-	else {
-		$rules = array(
-			'/^account\/manage\/?$/' => array('subtopic' => 'accountmanagement'),
-			'/^account\/create\/?$/' => array('subtopic' => 'createaccount'),
-			'/^account\/lost\/?$/' => array('subtopic' => 'lostaccount'),
-			'/^account\/logout\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'logout'),
-			'/^account\/password\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'change_password'),
-			'/^account\/register\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'register'),
-			'/^account\/register\/new\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'register_new'),
-			'/^account\/email\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'change_email'),
-			'/^account\/info\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'change_info'),
-			'/^account\/character\/create\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'create_character'),
-			'/^account\/character\/name\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'change_name'),
-			'/^account\/character\/sex\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'change_sex'),
-			'/^account\/character\/delete\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'delete_character'),
-			'/^account\/character\/comment\/[A-Za-z0-9-_%+\']+\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'change_comment', 'name' => '$3'),
-			'/^account\/character\/comment\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'change_comment'),
-			'/^account\/confirm_email\/[A-Za-z0-9-_]+\/?$/' => array('subtopic' => 'accountmanagement', 'action' => 'confirm_email', 'v' => '$2'),
-			'/^characters\/[A-Za-z0-9-_%+\']+$/' => array('subtopic' => 'characters', 'name' => '$1'),
-			'/^changelog\/[0-9]+\/?$/' => array('subtopic' => 'changelog', 'page' => '$1'),
-			'/^commands\/add\/?$/' => array('subtopic' => 'commands', 'action' => 'add'),
-			'/^commands\/edit\/?$/' => array('subtopic' => 'commands', 'action' => 'edit'),
-			'/^faq\/add\/?$/' => array('subtopic' => 'faq', 'action' => 'add'),
-			'/^faq\/edit\/?$/' => array('subtopic' => 'faq', 'action' => 'edit'),
-			'/^forum\/add_board\/?$/' => array('subtopic' => 'forum', 'action' => 'add_board'),#
-			'/^forum\/edit_board\/?$/' => array('subtopic' => 'forum', 'action' => 'edit_board'),
-			'/^forum\/board\/[0-9]+\/?$/' => array('subtopic' => 'forum', 'action' => 'show_board', 'id' => '$2'),
-			'/^forum\/board\/[0-9]+\/[0-9]+\/?$/' => array('subtopic' => 'forum', 'action' => 'show_board', 'id' => '$2', 'page' => '$3'),
-			'/^forum\/thread\/[0-9]+\/?$/' => array('subtopic' => 'forum', 'action' => 'show_thread', 'id' => '$2'),
-			'/^forum\/thread\/[0-9]+\/[0-9]+\/?$/' => array('subtopic' => 'forum', 'action' => 'show_thread', 'id' => '$2', 'page' => '$3'),
-			'/^gallery\/add\/?$/' => array('subtopic' => 'gallery', 'action' => 'add'),
-			'/^gallery\/edit\/?$/' => array('subtopic' => 'gallery', 'action' => 'edit'),
-			'/^gallery\/[0-9]+\/?$/' => array('subtopic' => 'gallery', 'image' => '$1'),
-			'/^gifts\/history\/?$/' => array('subtopic' => 'gifts', 'action' => 'show_history'),
-			'/^guilds\/[A-Za-z0-9-_%+\']+$/' => array('subtopic' => 'guilds', 'action' => 'show', 'guild' => '$1'),
-			'/^highscores\/[A-Za-z0-9-_]+\/[A-Za-z0-9-_]+\/[0-9]+\/?$/' => array('subtopic' => 'highscores', 'list' => '$1', 'vocation' => '$2', 'page' => '$3'),
-			'/^highscores\/[A-Za-z0-9-_]+\/[0-9]+\/?$/' => array('subtopic' => 'highscores', 'list' => '$1', 'page' => '$2'),
-			'/^highscores\/[A-Za-z0-9-_]+\/[A-Za-z0-9-_]+\/?$/' => array('subtopic' => 'highscores', 'list' => '$1', 'vocation' => '$2'),
-			'/^highscores\/[A-Za-z0-9-_\']+\/?$/' => array('subtopic' => 'highscores', 'list' => '$1'),
-			'/^news\/add\/?$/' => array('subtopic' => 'news', 'action' => 'add'),
-			'/^news\/edit\/?$/' => array('subtopic' => 'news', 'action' => 'edit'),
-			'/^news\/archive\/?$/' => array('subtopic' => 'newsarchive'),
-			'/^news\/archive\/[0-9]+\/?$/' => array('subtopic' => 'newsarchive', 'id' => '$2'),
-			'/^polls\/[0-9]+\/?$/' => array('subtopic' => 'polls', 'id' => '$1'),
-			'/^spells\/[A-Za-z0-9-_%]+\/[A-Za-z0-9-_]+\/?$/' => array('subtopic' => 'spells', 'vocation' => '$1', 'order' => '$2'),
-			'/^houses\/view\/?$/' => array('subtopic' => 'houses', 'page' => 'view')
-		);
+}
 
-		foreach($rules as $rule => $redirect) {
-			if (preg_match($rule, $uri)) {
-				$tmp = explode('/', $uri);
-				/* @var $redirect array */
-				foreach($redirect as $key => $value) {
+if(isset($_POST['vars']))
+{
+	foreach($_POST['vars'] as $key => $value) {
+		$_SESSION['var_' . $key] = $value;
+		$install_status[$key] = $value;
+	}
+}
+else {
+	foreach($install_status as $key => $value) {
+		$_SESSION['var_' . $key] = $value;
+	}
+}
 
-					if(strpos($value, '$') !== false) {
-						$value = str_replace('$' . $value[1], $tmp[$value[1]], $value);
-					}
+if($step == 'finish' && (!isset($config['installed']) || !$config['installed'])) {
+	$step = 'welcome';
+}
 
-					$_REQUEST[$key] = $value;
-					$_GET[$key] = $value;
-				}
+// step verify
+$steps = array(1 => 'welcome', 2 => 'license', 3 => 'requirements', 4 => 'config', 5 => 'database', 6 => 'admin', 7 => 'finish');
+if(!in_array($step, $steps)) // check if step is valid
+	throw new RuntimeException('ERROR: Unknown step.');
 
-				$found = true;
+$install_status['step'] = $step;
+$errors = array();
+
+if($step == 'database') {
+	foreach($_SESSION as $key => $value) {
+		if(strpos($key, 'var_') === false) {
+			continue;
+		}
+
+		$key = str_replace('var_', '', $key);
+
+		if(in_array($key, array('account', 'password', 'email', 'player_name'))) {
+			continue;
+		}
+
+		if($key != 'usage' && empty($value)) {
+			$errors[] = $locale['please_fill_all'];
+			break;
+		}
+		else if($key == 'server_path') {
+			$config['server_path'] = $value;
+
+			// take care of trailing slash at the end
+			if($config['server_path'][strlen($config['server_path']) - 1] != '/') {
+				$config['server_path'] .= '/';
+			}
+
+			if(!file_exists($config['server_path'] . 'config.lua')) {
+				$errors[] = $locale['step_database_error_config'];
 				break;
 			}
 		}
+		else if($key == 'mail_admin' && !Validator::email($value)) {
+			$errors[] = $locale['step_config_mail_admin_error'];
+			break;
+		}
+		else if($key == 'mail_address' && !Validator::email($value)) {
+			$errors[] = $locale['step_config_mail_address_error'];
+			break;
+		}
+		else if($key == 'timezone' && !in_array($value, DateTimeZone::listIdentifiers())) {
+			$errors[] = $locale['step_config_timezone_error'];
+			break;
+		}
+		else if($key == 'client' && !in_array($value, $config['clients'])) {
+			$errors[] = $locale['step_config_client_error'];
+			break;
+		}
+	}
+
+	if(!empty($errors)) {
+		$step = 'config';
+	}
+}
+else if($step == 'admin') {
+	$config_failed = true;
+	if(file_exists(BASE . 'config.local.php') && isset($config['installed']) && $config['installed'] && isset($_SESSION['saved'])) {
+		$config_failed = false;
+	}
+
+	if($config_failed) {
+		$step = 'database';
+	}
+}
+else if($step == 'finish') {
+	$email = $_SESSION['var_email'];
+	$password = $_SESSION['var_password'];
+	$player_name = $_SESSION['var_player_name'];
+
+	// email check
+	if(empty($email)) {
+		$errors[] = $locale['step_admin_email_error_empty'];
+	}
+	else if(!Validator::email($email)) {
+		$errors[] = $locale['step_admin_email_error_format'];
+	}
+
+	// account check
+	if(isset($_SESSION['var_account'])) {
+		if(empty($_SESSION['var_account'])) {
+			$errors[] = $locale['step_admin_account_error_empty'];
+		}
+		else if(!Validator::accountName($_SESSION['var_account'])) {
+			$errors[] = $locale['step_admin_account_error_format'];
+		}
+		else if(strtoupper($_SESSION['var_account']) == strtoupper($password)) {
+			$errors[] = $locale['step_admin_account_error_same'];
+		}
+	}
+	else if(isset($_SESSION['var_account_id'])) {
+		if(empty($_SESSION['var_account_id'])) {
+			$errors[] = $locale['step_admin_account_id_error_empty'];
+		}
+		else if(!Validator::accountId($_SESSION['var_account_id'])) {
+			$errors[] = $locale['step_admin_account_id_error_format'];
+		}
+		else if($_SESSION['var_account_id'] == $password) {
+			$errors[] = $locale['step_admin_account_id_error_same'];
+		}
+	}
+
+	// password check
+	if(empty($password)) {
+		$errors[] = $locale['step_admin_password_error_empty'];
+	}
+	else if(!Validator::password($password)) {
+		$errors[] = $locale['step_admin_password_error_format'];
+	}
+
+	// player name check
+	if(empty($player_name)) {
+		$errors[] = $locale['step_admin_player_name_error_empty'];
+	}
+	else if(!Validator::characterName($player_name)) {
+		$errors[] = $locale['step_admin_player_name_error_format'];
+	}
+
+	if(!empty($errors)) {
+		$step = 'admin';
 	}
 }
 
-// define page visited, so it can be used within events system
-$page = isset($_REQUEST['subtopic']) ? $_REQUEST['subtopic'] : (isset($_REQUEST['p']) ? $_REQUEST['p'] : '');
-if(empty($page) || !preg_match('/^[A-z0-9\_\-]+$/', $page)) {
-	$tmp = URI;
-	if(!empty($tmp)) {
-		$page = $tmp;
+if(empty($errors)) {
+	file_put_contents(CACHE . 'install.txt', serialize($install_status));
+}
+
+$error = false;
+
+clearstatcache();
+if(is_writable(CACHE) && (MYAAC_OS != 'WINDOWS' || win_is_writable(CACHE))) {
+	if(!file_exists(BASE . 'install/ip.txt')) {
+		$content = warning('AAC installation is disabled. To enable it make file <b>ip.txt</b> in install/ directory and put there your IP.<br/>
+		Your IP is:<br /><b>' . $_SERVER['REMOTE_ADDR'] . '</b>', true);
 	}
 	else {
-		if(!$found)
-			$page = '404';
-		else
-			$page = 'news';
-	}
-}
-
-$page = strtolower($page);
-define('PAGE', $page);
-
-$template_place_holders = array();
-
-require_once SYSTEM . 'init.php';
-
-// event system
-require_once SYSTEM . 'hooks.php';
-$hooks = new Hooks();
-$hooks->load();
-require_once SYSTEM . 'template.php';
-require_once SYSTEM . 'login.php';
-require_once SYSTEM . 'status.php';
-
-$twig->addGlobal('config', $config);
-$twig->addGlobal('status', $status);
-
-// verify myaac tables exists in database
-if(!$db->hasTable('myaac_account_actions')) {
-	throw new RuntimeException('Seems that the table <strong>myaac_account_actions</strong> of MyAAC doesn\'t exist in the database. This is a fatal error. You can try to reinstall MyAAC by visiting <a href="' . BASE_URL . 'install">this</a> url.');
-}
-
-require SYSTEM . 'migrate.php';
-
-$hooks->trigger(HOOK_STARTUP);
-
-// anonymous usage statistics
-// sent only when user agrees
-if(isset($config['anonymous_usage_statistics']) && $config['anonymous_usage_statistics']) {
-	$report_time = 30 * 24 * 60 * 60; // report one time per 30 days
-	$should_report = true;
-
-	$value = '';
-	if($cache->enabled() && $cache->fetch('last_usage_report', $value)) {
-		$should_report = time() > (int)$value + $report_time;
-	}
-	else {
-		$value = '';
-		if(fetchDatabaseConfig('last_usage_report', $value)) {
-			$should_report = time() > (int)$value + $report_time;
-			if($cache->enabled()) {
-				$cache->set('last_usage_report', $value);
+		$file_content = trim(file_get_contents(BASE . 'install/ip.txt'));
+		$allow = false;
+		$listIP = preg_split('/\s+/', $file_content);
+		foreach($listIP as $ip) {
+			if($_SERVER['REMOTE_ADDR'] == $ip) {
+				$allow = true;
 			}
 		}
+
+		if(!$allow)
+		{
+			$content = warning('In file <b>install/ip.txt</b> must be your IP!<br/>
+			In file is:<br /><b>' . nl2br($file_content) . '</b><br/>
+			Your IP is:<br /><b>' . $_SERVER['REMOTE_ADDR'] . '</b>', true);
+		}
 		else {
-			registerDatabaseConfig('last_usage_report', time() - ($report_time - (7 * 24 * 60 * 60))); // first report after a week
-			$should_report = false;
-		}
-	}
-
-	if($should_report) {
-		require_once LIBS . 'usage_statistics.php';
-		Usage_Statistics::report();
-
-		updateDatabaseConfig('last_usage_report', time());
-		if($cache->enabled()) {
-			$cache->set('last_usage_report', time());
-		}
-	}
-}
-
-if($config['views_counter'])
-	require_once SYSTEM . 'counter.php';
-
-if($config['visitors_counter'])
-{
-	require_once SYSTEM . 'libs/visitors.php';
-	$visitors = new Visitors($config['visitors_counter_ttl']);
-}
-
-// page content loading
-if(!isset($content[0]))
-	$content = '';
-$load_it = true;
-
-// check if site has been closed
-$site_closed = false;
-if(fetchDatabaseConfig('site_closed', $site_closed)) {
-	$site_closed = ($site_closed == 1);
-	if($site_closed) {
-		if(!admin())
-		{
-			$title = getDatabaseConfig('site_closed_title');
-			$content .= '<p class="note">' . getDatabaseConfig('site_closed_message') . '</p><br/>';
-			$load_it = false;
-		}
-
-		if(!$logged)
-		{
 			ob_start();
-			require SYSTEM . 'pages/accountmanagement.php';
-			$content .= ob_get_contents();
+
+			$step_id = array_search($step, $steps);
+			require 'steps/' . $step_id . '-' . $step . '.php';
+			$content = ob_get_contents();
 			ob_end_clean();
-			$load_it = false;
 		}
 	}
 }
-define('SITE_CLOSED', $site_closed);
-
-// backward support for gesior
-if($config['backward_support']) {
-	define('INITIALIZED', true);
-	$SQL = $db;
-	$layout_header = template_header();
-	$layout_name = $template_path;
-	$news_content = '';
-	$tickers_content = '';
-	$subtopic = PAGE;
-	$main_content = '';
-
-	$config['access_admin_panel'] = 2;
-	$group_id_of_acc_logged = 0;
-	if($logged && $account_logged)
-		$group_id_of_acc_logged = $account_logged->getGroupId();
-
-	$config['site'] = &$config;
-	$config['server'] = &$config['lua'];
-	$config['site']['shop_system'] = $config['gifts_system'];
-
-	if(!isset($config['vdarkborder']))
-		$config['vdarkborder'] = '#505050';
-	if(!isset($config['darkborder']))
-		$config['darkborder'] = '#D4C0A1';
-	if(!isset($config['lightborder']))
-		$config['lightborder'] = '#F1E0C6';
-
-	$config['site']['download_page'] = true;
-	$config['site']['serverinfo_page'] = true;
-	$config['site']['screenshot_page'] = true;
-
-	if($config['forum'] != '')
-		$config['forum_link'] = (strtolower($config['forum']) === 'site' ? getLink('forum') : $config['forum']);
-
-	foreach($status as $key => $value)
-		$config['status']['serverStatus_' . $key] = $value;
+else {
+	$content = error(file_get_contents(BASE . 'install/includes/twig_error.html'), true);
 }
 
-if($load_it)
-{
-	if(SITE_CLOSED && admin())
-		$content .= '<p class="note">Site is under maintenance (closed mode). Only privileged users can see it.</p>';
-
-	if($config['backward_support'])
-		require SYSTEM . 'compat_pages.php';
-
-	$ignore = false;
-
-	$logged_access = 1;
-	if($logged && $account_logged && $account_logged->isLoaded()) {
-		$logged_access = $account_logged->getAccess();
-	}
-
-	$success = false;
-	$tmp_content = getCustomPage($page, $success);
-	if($success) {
-		$content .= $tmp_content;
-		if(hasFlag(FLAG_CONTENT_PAGES) || superAdmin()) {
-			$pageInfo = getCustomPageInfo($page);
-			$content = $twig->render('admin.pages.links.html.twig', array(
-					'page' => array('id' => $pageInfo !== null ? $pageInfo['id'] : 0, 'hidden' => $pageInfo !== null ? $pageInfo['hidden'] : '0')
-				)) . $content;
-		}
-	} else {
-		$file = SYSTEM . 'pages/' . $page . '.php';
-		if(!@file_exists($file))
-		{
-			$page = '404';
-			$file = SYSTEM . 'pages/404.php';
-		}
-	}
-
-	ob_start();
-	if($hooks->trigger(HOOK_BEFORE_PAGE)) {
-		if(!$ignore)
-			require $file;
-	}
-
-	if($config['backward_support'] && isset($main_content[0]))
-		$content .= $main_content;
-
-	$content .= ob_get_contents();
-	ob_end_clean();
-	$hooks->trigger(HOOK_AFTER_PAGE);
-}
-
-if($config['backward_support']) {
-	$main_content = $content;
-	if(!isset($title))
-		$title = ucfirst($page);
-
-	$topic = $title;
-}
-
-$title_full =  (isset($title) ? $title . $config['title_separator'] : '') . $config['lua']['serverName'];
-require $template_path . '/' . $template_index;
-
-echo base64_decode('PCEtLSBQb3dlcmVkIGJ5IE15QUFDIDo6IGh0dHBzOi8vd3d3Lm15LWFhYy5vcmcvIC0tPg==') . PHP_EOL;
-if(superAdmin()) {
-	echo '<!-- Generated in: ' . round(microtime(true) - START_TIME, 4) . 'ms -->';
-	echo PHP_EOL . '<!-- Queries done: ' . $db->queries() . ' -->';
-	if(function_exists('memory_get_peak_usage')) {
-		echo PHP_EOL . '<!-- Peak memory usage: ' . convert_bytes(memory_get_peak_usage(true)) . ' -->';
-	}
-}
-
-$hooks->trigger(HOOK_FINISH);
+// render
+require 'template/template.php';
+//$_SESSION['laststep'] = $step;
